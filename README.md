@@ -1,6 +1,10 @@
-# Hypervisor Tray
+# turtle-hypervisor
 
-A tiny Windows 11 tray app that shows which hypervisor mode the machine booted in and toggles it with one click. No dependencies — a single PowerShell 5.1 script using WinForms.
+*For when the green turtle moves in.*
+
+A tiny Windows tray app that shows which hypervisor mode the machine booted in and toggles it with one click. No dependencies — a single PowerShell 5.1 script using WinForms.
+
+(The name: when VirtualBox runs on top of Hyper-V it shows a green turtle icon, meaning your VMs are on the slow path. This tray decides who gets the hypervisor — Docker or VirtualBox — so the turtle only appears when you've chosen it.)
 
 ## The problem it solves
 
