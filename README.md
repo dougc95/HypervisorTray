@@ -61,7 +61,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1
 
 Only cost: a sub-second console flash at logon.
 
-**Icon nowhere to be seen, but the app is running** — Windows 11 files brand-new tray icons into the hidden overflow flyout (the `^` next to the clock). The app promotes itself onto the taskbar a few seconds after starting; if you'd rather place it yourself, drag it out of the overflow, or use Settings → Personalization → Taskbar → *Other system tray icons*.
+**Icon nowhere to be seen, but the app is running** — Windows 11 puts brand-new tray icons in the hidden overflow flyout (the `^` next to the clock), and Explorer caches that decision for the session. To pin it to the taskbar right now:
+
+**Settings → Personalization → Taskbar → Other system tray icons → "Windows PowerShell" → On.**
+
+(That entry *is* this app — the tray runs inside `powershell.exe`.) The app also sets the promotion flag itself, which Explorer picks up from the next logon onward, so this is usually a one-time step on the machine.
 
 **Tray missing after a Windows feature update** — check `%LOCALAPPDATA%\HypervisorTray\startup-error.log`; feature updates can also re-enable Memory Integrity, which drags the hypervisor back on — the icon reports what actually booted, so trust it over your memory of what you set.
 
