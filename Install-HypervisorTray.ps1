@@ -29,7 +29,12 @@ $runKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName    = 'HypervisorTray'
 $taskName   = 'HypervisorTray'
 $psExe      = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$psArgs     = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destScript`""
+# Invoke via -Command, NOT -File. On some machines powershell.exe -File is
+# blocked when launched from Task Scheduler or the Run key (the process dies
+# before the engine even starts, reporting 0xFFFD0000 and logging nothing),
+# while the same script started with -Command runs fine. Reproduced here with
+# a one-line throwaway script, so it is the launch form, not this app.
+$psArgs     = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& '$destScript'`""
 
 function Stop-RunningTray {
     # Only kill a process that is verifiably the tray: the PID file can be
@@ -110,7 +115,7 @@ Copy-Item -LiteralPath $source -Destination $destScript -Force
 # the tray can never run, and installing a dead autostart would just produce
 # a silent failure at every logon.
 $test = Start-Process -FilePath $psExe -WindowStyle Hidden -Wait -PassThru `
-    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $destScript, '-SelfTest'
+    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', "& '$destScript' -SelfTest"
 if ($test.ExitCode -ne 0) {
     Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $roamDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -124,12 +129,14 @@ if ($test.ExitCode -ne 0) {
 # shortcut to a machine without the app silently no-ops instead of erroring
 # at every logon. Written as UTF-16 (WSH-native) for the same reason.
 $vbsLines = @(
-    'Dim sh, fso, p'
+    'Dim sh, fso, p, ps, cmd'
     'Set sh = CreateObject("WScript.Shell")'
     'Set fso = CreateObject("Scripting.FileSystemObject")'
     'p = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\HypervisorTray\HypervisorTray.ps1"'
+    'ps = sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"'
     'If fso.FileExists(p) Then'
-    '    sh.Run """" & sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & p & """", 0, False'
+    '    cmd = """" & ps & """ -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command ""& ''" & p & "''"""'
+    '    sh.Run cmd, 0, False'
     'End If'
 )
 $useWsh = (-not $DirectLauncher) -and (Test-WshAvailable)
@@ -161,8 +168,12 @@ try {
     $act = New-ScheduledTaskAction -Execute $psExe -Argument $psArgs
     $trg = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     $trg.Delay = 'PT15S'   # let the notification area exist before we add an icon
+    # Do NOT pass -ExecutionTimeLimit ([TimeSpan]::Zero) here: it serializes to
+    # PT0S, which Task Scheduler treats as "kill immediately" - the action dies
+    # before it can start and the task reports exit code 1. The default limit
+    # (72h) is left in place; a logon or the Run key restarts the tray anyway.
     $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+        -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $taskName -Action $act -Trigger $trg -Settings $set `
         -Description 'Starts the Hypervisor Tray at logon' -Force | Out-Null
     $taskOk = $true
@@ -174,7 +185,8 @@ if ($useWsh) {
     Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wscript.exe') `
         -ArgumentList ('"' + $vbsPath + '"') -WorkingDirectory $dest
 } else {
-    Start-Process -FilePath $psExe -ArgumentList $psArgs -WindowStyle Hidden -WorkingDirectory $dest
+    Start-Process -FilePath $psExe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', `
+        '-WindowStyle', 'Hidden', '-Command', "& '$destScript'" -WindowStyle Hidden -WorkingDirectory $dest
 }
 
 # Confirm the tray actually came up (Stop-RunningTray deleted the old PID
