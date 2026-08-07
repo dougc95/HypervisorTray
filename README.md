@@ -22,19 +22,28 @@ You can't have both at once, but you *can* make switching painless. This tray sh
 
 ## Install
 
-```powershell
-.\Install-HypervisorTray.ps1
-```
+Double-click **`Install.bat`** (or run `.\Install-HypervisorTray.ps1` from PowerShell).
 
-Copies the script to `%LOCALAPPDATA%\HypervisorTray`, adds a Startup-folder shortcut (launched via `wscript` so no console flashes at logon), and starts the tray. No admin needed.
+Copies the script to `%LOCALAPPDATA%\HypervisorTray`, adds a Startup-folder shortcut (launched via `wscript` so no console flashes at logon), and starts the tray. No admin needed — installation is per-user.
 
 ## Uninstall
 
-```powershell
-.\Install-HypervisorTray.ps1 -Uninstall
-```
+Double-click **`Uninstall.bat`** (or run `.\Install-HypervisorTray.ps1 -Uninstall`).
 
 Removes the shortcut and app folder. The current `hypervisorlaunchtype` value is left as-is.
+
+## Sharing / running on another machine
+
+The whole folder is self-contained — zip it, put it on a share, or clone the repo. On the target machine:
+
+1. Unzip anywhere and double-click `Install.bat`. The `.bat` wrappers pass `-ExecutionPolicy Bypass`, so it works even where the machine's PowerShell policy blocks scripts.
+2. If Windows blocks the downloaded files (Mark of the Web), right-click the `.zip` **before extracting** → Properties → **Unblock**, or run:
+
+   ```powershell
+   Get-ChildItem -Recurse | Unblock-File
+   ```
+
+**Requirements:** Windows 10 or 11 with Windows PowerShell 5.1 (built in — nothing to install). Toggling requires the user to be able to approve a UAC admin prompt.
 
 ## Manual run / self-test
 
@@ -59,4 +68,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\HypervisorTray.ps1 -SelfTe
 
 - [HypervisorTray.ps1](HypervisorTray.ps1) — the tray app
 - [Install-HypervisorTray.ps1](Install-HypervisorTray.ps1) — install / uninstall
+- [Install.bat](Install.bat) / [Uninstall.bat](Uninstall.bat) — double-click wrappers (handle execution policy)
 - [docs/2026-08-07-design.md](docs/2026-08-07-design.md) — design notes
+- [LICENSE](LICENSE) — MIT
