@@ -51,6 +51,18 @@ The whole folder is self-contained. Easiest: send people the repo's **Code → D
 
 **Requirements:** Windows 10 or 11 with Windows PowerShell 5.1 (built in — nothing to install). Toggling requires the user to be able to approve a UAC admin prompt.
 
+## Troubleshooting
+
+**"Can not find script file …HypervisorTray.vbs" at logon** — a race between the Windows Script Host launcher and logon-time file scanning (seen once in testing). Re-run the installer with the direct launcher, which skips WSH entirely:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1 -DirectLauncher
+```
+
+Only cost: a sub-second console flash at logon.
+
+**Tray missing after a Windows feature update** — check `%LOCALAPPDATA%\HypervisorTray\startup-error.log`; feature updates can also re-enable Memory Integrity, which drags the hypervisor back on — the icon reports what actually booted, so trust it over your memory of what you set.
+
 ## Manual run / self-test
 
 ```powershell

@@ -8,8 +8,12 @@
     Install copies HypervisorTray.ps1 to %LOCALAPPDATA%\HypervisorTray, adds a
     Startup-folder shortcut (via a wscript launcher where available, so no
     console flash at logon), and starts the tray now.
+
+    -DirectLauncher skips the wscript hop: the shortcut runs PowerShell
+    directly. Use it if logon ever shows a Windows Script Host error - the
+    only cost is a brief console flash at logon.
 #>
-param([switch]$Uninstall)
+param([switch]$Uninstall, [switch]$DirectLauncher)
 
 $ErrorActionPreference = 'Stop'
 
@@ -121,9 +125,13 @@ $vbsLines = @(
     '    sh.Run """" & sh.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & p & """", 0, False'
     'End If'
 )
-$useWsh = Test-WshAvailable
+$useWsh = (-not $DirectLauncher) -and (Test-WshAvailable)
 if ($useWsh) {
     Set-Content -LiteralPath $vbsPath -Value ($vbsLines -join "`r`n") -Encoding Unicode
+} else {
+    # No vbs in play - clean up a stale one from a previous wsh-mode install
+    # so nothing references it.
+    Remove-Item -LiteralPath $roamDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $ws = New-Object -ComObject WScript.Shell
@@ -166,7 +174,11 @@ foreach ($i in 1..120) {
 Write-Output "Installed to $dest"
 Write-Output "Startup shortcut: $shortcut"
 if (-not $useWsh) {
-    Write-Output 'Note: VBScript/WSH is unavailable on this machine - the tray starts via PowerShell directly, which briefly flashes a console at logon.'
+    if ($DirectLauncher) {
+        Write-Output 'Direct launcher selected: the tray starts via PowerShell directly (brief console flash at logon).'
+    } else {
+        Write-Output 'Note: VBScript/WSH is unavailable on this machine - the tray starts via PowerShell directly, which briefly flashes a console at logon.'
+    }
 }
 if ($started) {
     if ((Get-CimInstance -ClassName Win32_ComputerSystem).HypervisorPresent) {
