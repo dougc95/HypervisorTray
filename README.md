@@ -61,6 +61,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1
 
 Only cost: a sub-second console flash at logon.
 
+**Icon nowhere to be seen, but the app is running** — Windows 11 files brand-new tray icons into the hidden overflow flyout (the `^` next to the clock). The app promotes itself onto the taskbar a few seconds after starting; if you'd rather place it yourself, drag it out of the overflow, or use Settings → Personalization → Taskbar → *Other system tray icons*.
+
 **Tray missing after a Windows feature update** — check `%LOCALAPPDATA%\HypervisorTray\startup-error.log`; feature updates can also re-enable Memory Integrity, which drags the hypervisor back on — the icon reports what actually booted, so trust it over your memory of what you set.
 
 ## Manual run / self-test

@@ -27,6 +27,7 @@ $pidFile    = Join-Path $dest 'tray.pid'
 $shortcut   = Join-Path ([Environment]::GetFolderPath('Startup')) 'HypervisorTray.lnk'   # legacy, cleaned up
 $runKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runName    = 'HypervisorTray'
+$taskName   = 'HypervisorTray'
 $psExe      = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $psArgs     = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destScript`""
 
@@ -67,6 +68,7 @@ function Test-WshAvailable {
 if ($Uninstall) {
     Stop-RunningTray
     Remove-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue
+    try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop } catch { }
     if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut }
     if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
     if (Test-Path -LiteralPath $roamDir) { Remove-Item -LiteralPath $roamDir -Recurse -Force }
@@ -150,6 +152,24 @@ Set-ItemProperty -Path $runKey -Name $runName -Value $autostartCmd
 # Clean up the Startup-folder shortcut older versions installed.
 if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut }
 
+# Belt and braces: register a logon scheduled task as well. The Run key was
+# observed silently skipping this entry at logon on the development machine,
+# and Startup-folder shortcuts failed there too; whichever mechanism fires
+# first wins and the app's single-instance mutex discards the loser.
+$taskOk = $false
+try {
+    $act = New-ScheduledTaskAction -Execute $psExe -Argument $psArgs
+    $trg = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+    $trg.Delay = 'PT15S'   # let the notification area exist before we add an icon
+    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $taskName -Action $act -Trigger $trg -Settings $set `
+        -Description 'Starts the Hypervisor Tray at logon' -Force | Out-Null
+    $taskOk = $true
+} catch {
+    Write-Output "Note: could not register the logon scheduled task ($($_.Exception.Message)). Falling back to the Run key alone."
+}
+
 if ($useWsh) {
     Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wscript.exe') `
         -ArgumentList ('"' + $vbsPath + '"') -WorkingDirectory $dest
@@ -172,7 +192,11 @@ foreach ($i in 1..120) {
 }
 
 Write-Output "Installed to $dest"
-Write-Output "Autostart: '$runName' entry in HKCU Run (visible in Task Manager > Startup apps)"
+if ($taskOk) {
+    Write-Output "Autostart: HKCU Run entry '$runName' + logon scheduled task '$taskName' (either one is enough)"
+} else {
+    Write-Output "Autostart: HKCU Run entry '$runName' (visible in Task Manager > Startup apps)"
+}
 if (-not $useWsh) {
     if ($DirectLauncher) {
         Write-Output 'Direct launcher selected: the tray starts via PowerShell directly (brief console flash at logon).'

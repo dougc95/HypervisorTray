@@ -242,6 +242,27 @@ function Invoke-RebootNow {
 
 # ---------- UI ----------
 
+function Set-IconPromoted {
+    # Windows 11 hides brand-new tray icons in the overflow flyout by default,
+    # which for this app means its one visual signal is invisible. Windows
+    # records each icon under Control Panel\NotifyIconSettings once it has
+    # been shown; flipping IsPromoted puts it on the taskbar itself. Match on
+    # our own tooltip text so we never touch another app's icon.
+    try {
+        $base = 'HKCU:\Control Panel\NotifyIconSettings'
+        if (-not (Test-Path -LiteralPath $base)) { return }
+        foreach ($item in Get-ChildItem -LiteralPath $base -ErrorAction Stop) {
+            $p = Get-ItemProperty -LiteralPath $item.PSPath -ErrorAction SilentlyContinue
+            if ($p -and $p.ExecutablePath -match 'powershell\.exe$' -and
+                $p.InitialTooltip -match '^(Docker mode|VBox-fast mode|Now: )') {
+                if ($p.IsPromoted -ne 1) {
+                    Set-ItemProperty -LiteralPath $item.PSPath -Name 'IsPromoted' -Value 1 -Type DWord
+                }
+            }
+        }
+    } catch { }
+}
+
 function Update-Ui {
     $current = Get-CurrentMode
     $next = Get-NextBootMode
@@ -369,6 +390,16 @@ try {
     $script:Notify.ContextMenuStrip = $menu
     Update-Ui
     $script:Notify.Visible = $true
+
+    # Windows writes the icon's registry entry a moment after it first
+    # appears, so promote on a one-shot timer rather than inline.
+    $promoteTimer = New-Object System.Windows.Forms.Timer
+    $promoteTimer.Interval = 3000
+    $promoteTimer.add_Tick({
+        $promoteTimer.Stop()
+        Set-IconPromoted
+    })
+    $promoteTimer.Start()
 
     $ctx = New-Object System.Windows.Forms.ApplicationContext
     [System.Windows.Forms.Application]::Run($ctx)
