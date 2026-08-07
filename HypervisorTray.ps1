@@ -16,9 +16,23 @@ param([switch]$SelfTest)
 
 $ErrorActionPreference = 'Stop'
 
+# AppLocker/WDAC-managed machines run user-writable scripts in Constrained
+# Language Mode, where Add-Type and WinForms are forbidden - fail loudly (and
+# leave a log, since the logon launch is headless) instead of dying silently.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
+    $reason = "Cannot start: PowerShell LanguageMode is '$($ExecutionContext.SessionState.LanguageMode)' (AppLocker/WDAC restriction) - FullLanguage is required."
+    try {
+        $logDir = Join-Path $env:LOCALAPPDATA 'HypervisorTray'
+        if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        "[$(Get-Date)] $reason" | Set-Content -LiteralPath (Join-Path $logDir 'startup-error.log')
+    } catch { }
+    Write-Output "Hypervisor Tray: $reason"
+    exit 1
+}
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -Namespace Win32Native -Name IconUtil -MemberDefinition '[DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);'
+Add-Type -Namespace Win32Native -Name IconUtil -MemberDefinition '[DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
 
 $script:StateDir  = Join-Path $env:LOCALAPPDATA 'HypervisorTray'
 $script:StateFile = Join-Path $script:StateDir 'state.json'
@@ -95,7 +109,11 @@ function Get-ModeShortLabel([string]$mode) {
 # ---------- icon rendering ----------
 
 function New-ModeIcon([string]$mode, [bool]$pending) {
-    $bmp = New-Object System.Drawing.Bitmap 16, 16
+    # Render at the real tray icon size (scales with display DPI once the
+    # process is DPI-aware) - a fixed 16x16 goes blurry at 125-200% scaling.
+    $px = [System.Windows.Forms.SystemInformation]::SmallIconSize.Width
+    if ($px -lt 16) { $px = 16 }
+    $bmp = New-Object System.Drawing.Bitmap $px, $px
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     try {
         $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -107,14 +125,16 @@ function New-ModeIcon([string]$mode, [bool]$pending) {
             $letter = 'V'
         }
         $brush = New-Object System.Drawing.SolidBrush $bg
-        $g.FillEllipse($brush, 0, 0, 15, 15)
-        $font = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold)
+        $g.FillEllipse($brush, 0, 0, ($px - 1), ($px - 1))
+        $font = New-Object System.Drawing.Font('Segoe UI', ([single]($px * 0.47)), [System.Drawing.FontStyle]::Bold)
         $size = $g.MeasureString($letter, $font)
         $g.DrawString($letter, $font, [System.Drawing.Brushes]::White,
-            ([single]((16 - $size.Width) / 2)), ([single]((16 - $size.Height) / 2)))
+            ([single](($px - $size.Width) / 2)), ([single](($px - $size.Height) / 2)))
         if ($pending) {
             $dot = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::Gold)
-            $g.FillEllipse($dot, 10, 10, 6, 6)
+            $dotSize = [int][Math]::Ceiling($px * 0.375)
+            $dotOff = [int]($px * 0.625)
+            $g.FillEllipse($dot, $dotOff, $dotOff, $dotSize, $dotSize)
             $dot.Dispose()
         }
         $brush.Dispose()
@@ -294,14 +314,21 @@ try {
 } catch [System.Threading.AbandonedMutexException] {
     $owned = $true
 }
-if (-not $owned) { exit 0 }   # already running
+if (-not $owned) {
+    Write-Output 'Hypervisor Tray is already running.'
+    exit 0
+}
 
 try {
     if (-not (Test-Path -LiteralPath $script:StateDir)) {
         New-Item -ItemType Directory -Path $script:StateDir -Force | Out-Null
     }
+    # Move CWD out of wherever we were launched from (e.g. a freshly unzipped
+    # folder the user will want to delete) - a process's CWD locks the folder.
+    Set-Location -LiteralPath $script:StateDir
     $PID | Set-Content -LiteralPath $script:PidFile -Encoding ASCII
 
+    [void][Win32Native.IconUtil]::SetProcessDPIAware()
     [System.Windows.Forms.Application]::EnableVisualStyles()
 
     $script:Notify = New-Object System.Windows.Forms.NotifyIcon
