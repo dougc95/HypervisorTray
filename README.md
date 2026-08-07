@@ -2,9 +2,9 @@
 
 *For when the green turtle moves in.*
 
-A tiny Windows tray app that shows which hypervisor mode the machine booted in and toggles it with one click. No dependencies — a single PowerShell 5.1 script using WinForms.
+A tiny Windows tray app that shows which hypervisor mode the machine booted in and toggles it with one click. A single Go binary — no runtime, no dependencies, no scripts.
 
-(The name: when VirtualBox runs on top of Hyper-V it shows a green turtle icon, meaning your VMs are on the slow path. This tray decides who gets the hypervisor — Docker or VirtualBox — so the turtle only appears when you've chosen it.)
+(The name: when VirtualBox runs on top of Hyper-V it shows a green turtle icon, meaning your VMs are on the slow path. This tray decides who gets the hypervisor — Docker or VirtualBox — so the turtle only shows up when you've chosen it.)
 
 ## The problem it solves
 
@@ -19,79 +19,58 @@ You can't have both at once, but you *can* make switching painless. This tray sh
 
 ## Usage
 
-- **Tray icon** = current boot's mode. A gold dot means a mode change is pending a reboot.
-- **Right-click** → status lines, **Switch to … mode (next boot)…**, **Reboot now…**, Exit.
+- **Tray icon** = the mode this boot is running in. A gold dot means a mode change is pending a reboot.
+- **Right-click** → status lines, **Switch to … (next boot)…**, **Reboot now…**, Exit.
 - **Left double-click** = toggle.
-- Toggling triggers **one UAC prompt** (the app itself stays unelevated), then offers to reboot now (5-second countdown, abortable with `shutdown /a`) or later.
+- Toggling raises **one UAC prompt** (the app itself runs unelevated), then offers to reboot now — 5-second countdown, abortable with `shutdown /a` — or later.
 
 ## Install
 
-Double-click **`Install.bat`** (or run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1`).
-
-Copies the script to `%LOCALAPPDATA%\HypervisorTray`, registers a per-user autostart in the registry Run key (via a `wscript` launcher where available, so no console flashes at logon — you'll see it in Task Manager → Startup apps as "HypervisorTray"), and starts the tray. No admin needed.
-
-## Uninstall
-
-Double-click **`Uninstall.bat`** (or run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1 -Uninstall`).
-
-Removes the shortcut and app folder. The current `hypervisorlaunchtype` value is left as-is.
-
-## Sharing / running on another machine
-
-The whole folder is self-contained. Easiest: send people the repo's **Code → Download ZIP** link on GitHub (that zip has no git history in it — zipping the folder yourself would include the hidden `.git` directory unless you use `git archive`). On the target machine:
-
-1. **Extract the zip first**, then double-click `Install.bat`. The `.bat` wrappers pass `-ExecutionPolicy Bypass`, which clears the *default* script-execution block on stock Windows.
-2. If Windows flags the downloaded files (Mark of the Web), right-click the `.zip` **before extracting** → Properties → **Unblock**, or run this inside the extracted folder:
-
-   ```powershell
-   Get-ChildItem -Recurse | Unblock-File
-   ```
-
-**Corporate machines:** if your organization enforces PowerShell policy via Group Policy or AppLocker/WDAC, that *overrides* the Bypass flag — the installer detects this, warns, and refuses to install a dead autostart entry. Ask IT in that case. On machines where VBScript/WSH has been removed, the installer automatically falls back to a direct PowerShell autostart (works fine, briefly flashes a console at logon).
-
-**Requirements:** Windows 10 or 11 with Windows PowerShell 5.1 (built in — nothing to install). Toggling requires the user to be able to approve a UAC admin prompt.
-
-## Troubleshooting
-
-**"Can not find script file …HypervisorTray.vbs" at logon** — a race between the Windows Script Host launcher and logon-time file scanning (seen once in testing). Re-run the installer with the direct launcher, which skips WSH entirely:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1 -DirectLauncher
+```
+turtle-hypervisor.exe -install
 ```
 
-Only cost: a sub-second console flash at logon.
+Copies itself to `%LOCALAPPDATA%\turtle-hypervisor`, registers a per-user logon autostart, and starts the tray. No admin required.
 
-**Icon nowhere to be seen, but the app is running** — Windows 11 puts brand-new tray icons in the hidden overflow flyout (the `^` next to the clock), and Explorer caches that decision for the session. To pin it to the taskbar right now:
+Uninstall with `turtle-hypervisor.exe -uninstall` (leaves `hypervisorlaunchtype` exactly as it is). `-selftest` runs the non-UI checks: mode detection, state round-trip, icon rendering.
 
-**Settings → Personalization → Taskbar → Other system tray icons → "Windows PowerShell" → On.**
+## Build
 
-(That entry *is* this app — the tray runs inside `powershell.exe`.) The app also sets the promotion flag itself, which Explorer picks up from the next logon onward, so this is usually a one-time step on the machine.
-
-**Tray missing after a Windows feature update** — check `%LOCALAPPDATA%\HypervisorTray\startup-error.log`; feature updates can also re-enable Memory Integrity, which drags the hypervisor back on — the icon reports what actually booted, so trust it over your memory of what you set.
-
-## Manual run / self-test
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\HypervisorTray.ps1            # run in foreground
-powershell -NoProfile -ExecutionPolicy Bypass -File .\HypervisorTray.ps1 -SelfTest  # headless logic test
 ```
+cd go && go build -ldflags="-H=windowsgui -s -w" -o ../turtle-hypervisor.exe .
+```
+
+Requires Go 1.26+ and amd64 Windows. Pure standard library — `syscall` bindings to user32/shell32/gdi32, no modules to fetch.
 
 ## How it works
 
-- **Current mode**: `Win32_ComputerSystem.HypervisorPresent` via CIM — needs no admin and cannot change mid-boot, so the icon is always truthful.
-- **Toggle**: `bcdedit /set hypervisorlaunchtype auto|off` run elevated via `Start-Process -Verb RunAs` (the one UAC prompt).
-- **Next-boot state**: reading the BCD store needs admin, so the app records what it last wrote in `%LOCALAPPDATA%\HypervisorTray\state.json`, tagged with the boot session it was written in. Records from an earlier boot session are treated as consumed. Session identity (not timestamps) makes this immune to DST transitions and clock adjustments.
+- **Current mode**: the CPUID leaf-1 hypervisor-present bit (ECX bit 31). Needs no admin and cannot change mid-boot, so the icon is always truthful.
+- **Toggle**: `bcdedit /set hypervisorlaunchtype auto|off`, run elevated through `ShellExecuteEx` with the `runas` verb — the single UAC prompt.
+- **Next-boot state**: reading the BCD needs admin, so the app records what it last wrote in `state.json`, tagged with the boot session it was written in. Entries from an earlier session are treated as already applied, which makes the pending marker immune to clock changes and DST.
+- **The icon carries a fixed GUID.** This matters: an icon identified only by its window handle looks brand-new to Windows on every launch, so it gets filed into the hidden overflow every time and no "show this icon" setting can stick. With a stable GUID, your choice persists.
+
+## Troubleshooting
+
+**Icon is in the hidden overflow** — drag it out onto the taskbar once, or turn it on under **Settings → Personalization → Taskbar → Other system tray icons → turtle-hypervisor.exe**. With the fixed GUID this only needs doing once.
+
+**Tray doesn't start at logon** — check the autostart entries:
+
+```
+schtasks /query /tn turtle-hypervisor
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v turtle-hypervisor
+```
+
+On some machines Explorer never processes `Run` entries; the logon scheduled task covers that case. Run `turtle-hypervisor.exe -install` again to recreate both.
+
+**Mode looks wrong after a Windows update** — feature updates can silently re-enable Memory Integrity (Core Isolation), which turns the hypervisor back on. The icon reports what actually booted, so trust it over what you last set.
 
 ## Limitations
 
-- Changes made with `bcdedit` outside this app aren't detected (by design — the app stays unelevated at rest).
-- Windows can silently re-enable the hypervisor even with `hypervisorlaunchtype off` if **Memory Integrity** (Core Isolation) or Smart App Control turns on — check after feature updates. The icon will tell you: it reports what actually booted.
-- A reboot is required to switch modes. That's Windows, not the app.
+- Changes made to `hypervisorlaunchtype` outside this app aren't detected for the *pending* indicator (reading the BCD store requires admin; the app deliberately stays unelevated at rest). The current-mode icon is always correct.
+- Switching modes requires a reboot. That's Windows, not the app.
+- amd64 Windows only.
 
 ## Files
 
-- [HypervisorTray.ps1](HypervisorTray.ps1) — the tray app
-- [Install-HypervisorTray.ps1](Install-HypervisorTray.ps1) — install / uninstall
-- [Install.bat](Install.bat) / [Uninstall.bat](Uninstall.bat) — double-click wrappers (handle execution policy)
-- [docs/2026-08-07-design.md](docs/2026-08-07-design.md) — design notes
+- [go/](go) — the source (`main.go` app logic, `win32.go` API bindings, `icon.go` icon drawing, `promote.go` taskbar promotion, `cpuid_amd64.s` hypervisor detection)
 - [LICENSE](LICENSE) — MIT
