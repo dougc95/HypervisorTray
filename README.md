@@ -28,7 +28,7 @@ You can't have both at once, but you *can* make switching painless. This tray sh
 
 Double-click **`Install.bat`** (or run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-HypervisorTray.ps1`).
 
-Copies the script to `%LOCALAPPDATA%\HypervisorTray`, adds a Startup-folder shortcut (launched via `wscript` so no console flashes at logon), and starts the tray. No admin needed — installation is per-user.
+Copies the script to `%LOCALAPPDATA%\HypervisorTray`, registers a per-user autostart in the registry Run key (via a `wscript` launcher where available, so no console flashes at logon — you'll see it in Task Manager → Startup apps as "HypervisorTray"), and starts the tray. No admin needed.
 
 ## Uninstall
 

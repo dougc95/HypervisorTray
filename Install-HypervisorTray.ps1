@@ -5,9 +5,11 @@
     Install:   .\Install-HypervisorTray.ps1     (or double-click Install.bat)
     Uninstall: .\Install-HypervisorTray.ps1 -Uninstall
 
-    Install copies HypervisorTray.ps1 to %LOCALAPPDATA%\HypervisorTray, adds a
-    Startup-folder shortcut (via a wscript launcher where available, so no
-    console flash at logon), and starts the tray now.
+    Install copies HypervisorTray.ps1 to %LOCALAPPDATA%\HypervisorTray,
+    registers a logon autostart in the HKCU Run key (via a wscript launcher
+    where available, so no console flash at logon), and starts the tray now.
+    (The Run key is used instead of the Startup folder: Windows processes it
+    deterministically at logon, while Startup-folder items proved flaky.)
 
     -DirectLauncher skips the wscript hop: the shortcut runs PowerShell
     directly. Use it if logon ever shows a Windows Script Host error - the
@@ -22,7 +24,9 @@ $destScript = Join-Path $dest 'HypervisorTray.ps1'
 $roamDir    = Join-Path $env:APPDATA 'HypervisorTray'
 $vbsPath    = Join-Path $roamDir 'HypervisorTray.vbs'
 $pidFile    = Join-Path $dest 'tray.pid'
-$shortcut   = Join-Path ([Environment]::GetFolderPath('Startup')) 'HypervisorTray.lnk'
+$shortcut   = Join-Path ([Environment]::GetFolderPath('Startup')) 'HypervisorTray.lnk'   # legacy, cleaned up
+$runKey     = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$runName    = 'HypervisorTray'
 $psExe      = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $psArgs     = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$destScript`""
 
@@ -62,10 +66,11 @@ function Test-WshAvailable {
 
 if ($Uninstall) {
     Stop-RunningTray
+    Remove-ItemProperty -Path $runKey -Name $runName -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut }
     if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
     if (Test-Path -LiteralPath $roamDir) { Remove-Item -LiteralPath $roamDir -Recurse -Force }
-    Write-Output 'Hypervisor Tray uninstalled (startup shortcut, launcher, and app folder removed).'
+    Write-Output 'Hypervisor Tray uninstalled (autostart entry, launcher, and app folder removed).'
     Write-Output 'Note: hypervisorlaunchtype itself is untouched - whatever mode is set stays set.'
     exit 0
 }
@@ -134,21 +139,16 @@ if ($useWsh) {
     Remove-Item -LiteralPath $roamDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$ws = New-Object -ComObject WScript.Shell
-$sc = $ws.CreateShortcut($shortcut)
 if ($useWsh) {
-    $sc.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-    $sc.Arguments = '"' + $vbsPath + '"'
+    $autostartCmd = '"' + (Join-Path $env:SystemRoot 'System32\wscript.exe') + '" "' + $vbsPath + '"'
 } else {
     # No VBScript engine on this machine: launch PowerShell directly. Works
     # everywhere, at the cost of a brief console flash at logon.
-    $sc.TargetPath = $psExe
-    $sc.Arguments = $psArgs
+    $autostartCmd = '"' + $psExe + '" ' + $psArgs
 }
-$sc.WorkingDirectory = $dest
-$sc.WindowStyle = 7
-$sc.Description = 'Hypervisor mode tray toggle (Docker vs VirtualBox-fast)'
-$sc.Save()
+Set-ItemProperty -Path $runKey -Name $runName -Value $autostartCmd
+# Clean up the Startup-folder shortcut older versions installed.
+if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut }
 
 if ($useWsh) {
     Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\wscript.exe') `
@@ -172,7 +172,7 @@ foreach ($i in 1..120) {
 }
 
 Write-Output "Installed to $dest"
-Write-Output "Startup shortcut: $shortcut"
+Write-Output "Autostart: '$runName' entry in HKCU Run (visible in Task Manager > Startup apps)"
 if (-not $useWsh) {
     if ($DirectLauncher) {
         Write-Output 'Direct launcher selected: the tray starts via PowerShell directly (brief console flash at logon).'
